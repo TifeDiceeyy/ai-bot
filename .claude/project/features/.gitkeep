@@ -1,0 +1,13 @@
+# User Story Specifications
+
+This directory contains detailed user story specifications.
+
+## Naming Convention
+
+Files should be named: `us-XXX-short-name.md`
+
+Example: `us-001-user-login.md`
+
+## Template
+
+See the project-standards skill for the user story format.

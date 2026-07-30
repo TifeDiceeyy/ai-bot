@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Studio AI</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <nav class="navbar">
+        <div class="wordmark">
+          <svg
+            class="wordmark-icon"
+            viewBox="0 0 24 24"
+            fill="none"
+            aria-hidden="true"
+          >
+            <circle
+              cx="12"
+              cy="12"
+              r="9"
+              stroke="currentColor"
+              stroke-width="1.6"
+            />
+            <circle
+              cx="12"
+              cy="12"
+              r="3"
+              stroke="currentColor"
+              stroke-width="1.6"
+            />
+          </svg>
+          Studio AI
+        </div>
+      </nav>
+
+      <main class="hero">
+        <div class="hero-decor" aria-hidden="true"></div>
+
+        <h1 class="hero-title">
+          Editing stunning images<br />with AI in seconds
+        </h1>
+        <p class="hero-subtitle">
+          Upload a photo, describe the edit, and get a natural, prompt-accurate
+          result — no oversharpening, no AI glow, just a real photo.
+        </p>
+
+        <div class="layout">
+          <section class="controls card">
+            <h2 class="card-title">Trusted By Creators Worldwide</h2>
+
+            <label class="dropzone" id="dropzoneLabel">
+              <svg
+                class="dropzone-icon"
+                viewBox="0 0 24 24"
+                fill="none"
+                aria-hidden="true"
+              >
+                <path
+                  d="M12 16V4M12 4L7 9M12 4l5 5"
+                  stroke="currentColor"
+                  stroke-width="1.6"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+                <path
+                  d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"
+                  stroke="currentColor"
+                  stroke-width="1.6"
+                  stroke-linecap="round"
+                />
+              </svg>
+              <span class="dropzone-label" id="dropzoneText">Image Upload</span>
+              <span class="dropzone-hint"
+                >We accept .jpeg, .png, .jpg, .webp</span
+              >
+              <input
+                id="fileInput"
+                type="file"
+                accept="image/png,image/jpeg,image/webp"
+                class="visually-hidden"
+              />
+            </label>
+
+            <label class="field-label" for="instructionInput"
+              >Prompt Generation</label
+            >
+            <textarea
+              id="instructionInput"
+              rows="4"
+              class="field-input"
+              placeholder="Describe the edit..."
+            ></textarea>
+
+            <label class="field-label" for="editorSelect">Model</label>
+            <select id="editorSelect" class="field-input">
+              <option value="banana" selected>Studio 1</option>
+              <option value="dream">Studio 2</option>
+            </select>
+
+            <label class="field-label" for="qualitySelect">Quality</label>
+            <select id="qualitySelect" class="field-input">
+              <option value="natural" selected>Natural</option>
+              <option value="upscale">Upscale</option>
+            </select>
+
+            <button id="runButton" class="cta-button" disabled>
+              Edit Image
+            </button>
+
+            <p id="status" class="status"></p>
+          </section>
+
+          <section class="preview">
+            <div class="pane pane-before">
+              <img id="beforeImage" alt="Original image" />
+              <span class="pane-label">Before</span>
+            </div>
+
+            <div class="pane pane-after">
+              <img id="afterImage" alt="Edited image" />
+              <span class="pane-label">After</span>
+              <a id="downloadLink" class="download-link" download hidden
+                >Download image</a
+              >
+            </div>
+          </section>
+        </div>
+      </main>
+    </div>
+
+    <script type="module" src="main.ts"></script>
+  </body>
+</html>

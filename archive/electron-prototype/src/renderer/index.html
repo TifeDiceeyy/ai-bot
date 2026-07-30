@@ -1,0 +1,58 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>AI Image Editor</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <h1>AI Image Editor</h1>
+    <button id="settingsBtn" class="icon-btn" title="Settings">⚙</button>
+  </header>
+
+  <main>
+    <section class="controls">
+      <div class="field">
+        <label for="modelSelect">Model</label>
+        <select id="modelSelect"></select>
+      </div>
+
+      <div class="field">
+        <label for="promptInput">Edit instructions</label>
+        <textarea id="promptInput" rows="5" placeholder="Describe the edit in detail, e.g. 'Change the car color to matte black, keep the background and lighting exactly the same, add subtle rain reflections on the hood.'"></textarea>
+      </div>
+
+      <button id="pickBtn">Choose Image…</button>
+      <button id="editBtn" disabled>Run Edit</button>
+      <button id="saveBtn" disabled>Save Result…</button>
+
+      <p id="status" class="status"></p>
+    </section>
+
+    <section class="preview">
+      <div class="pane">
+        <h2>Original</h2>
+        <div class="image-box"><img id="originalImg" alt="Original" /></div>
+      </div>
+      <div class="pane">
+        <h2>Edited</h2>
+        <div class="image-box"><img id="editedImg" alt="Edited" /></div>
+      </div>
+    </section>
+  </main>
+
+  <dialog id="settingsDialog">
+    <h2>fal.ai API Key</h2>
+    <p>Get a key at <code>fal.ai/dashboard/keys</code>. Stored encrypted on this machine only.</p>
+    <input id="apiKeyInput" type="password" placeholder="fal_..." />
+    <div class="dialog-actions">
+      <button id="saveKeyBtn">Save</button>
+      <button id="closeSettingsBtn">Cancel</button>
+    </div>
+    <p id="settingsStatus" class="status"></p>
+  </dialog>
+
+  <script src="renderer.js"></script>
+</body>
+</html>

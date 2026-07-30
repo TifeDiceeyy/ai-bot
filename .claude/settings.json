@@ -1,0 +1,18 @@
+{
+  "scaffoldVersion": "1.0.6",
+  "scaffoldDate": "2026-07-29",
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -r '.tool_input.file_path' | { read f; case \"$f\" in *.js|*.ts|*.jsx|*.tsx|*.json|*.css|*.html|*.md) npx prettier --write \"$f\" 2>/dev/null ;; *.py) black \"$f\" 2>/dev/null ;; *.rs) rustfmt \"$f\" 2>/dev/null ;; esac; }",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}

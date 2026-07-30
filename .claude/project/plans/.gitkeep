@@ -1,0 +1,13 @@
+# Implementation Plans
+
+This directory contains implementation plans for user stories.
+
+## Naming Convention
+
+Files should be named: `us-XXX-plan.md`
+
+Example: `us-001-plan.md`
+
+## Template
+
+See the development-workflow skill for the plan template.
