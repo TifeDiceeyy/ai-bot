@@ -1,5 +1,5 @@
 interface EditResponse {
-  imagePath: string;
+  imageBase64: string;
   width: number;
   height: number;
 }
@@ -95,6 +95,7 @@ runButton.addEventListener("click", async () => {
         imageBase64: currentImageBase64,
         instruction: instructionInput.value.trim(),
         quality: qualitySelect.value,
+        editor: editorSelect.value,
       }),
     });
 
@@ -104,9 +105,9 @@ runButton.addEventListener("click", async () => {
     }
 
     const result = (await response.json()) as EditResponse;
-    afterImage.src = `${result.imagePath}?t=${Date.now()}`;
-    downloadLink.href = result.imagePath;
-    downloadLink.download = result.imagePath.split("/").pop() ?? "edited.png";
+    afterImage.src = result.imageBase64;
+    downloadLink.href = result.imageBase64;
+    downloadLink.download = "edited.png";
     downloadLink.hidden = false;
     setStatus(`Done — ${result.width}x${result.height}`);
   } catch (err) {

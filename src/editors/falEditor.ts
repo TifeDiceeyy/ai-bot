@@ -72,7 +72,9 @@ export function createFalEditor(config: FalEditorConfig): ImageEditor {
         config.imageInputMode === "url"
           ? { image_url: imageUrl }
           : { image_urls: [imageUrl] };
-      const qualityTier = input.quality ? config.quality?.[input.quality] : undefined;
+      const qualityTier = input.quality
+        ? config.quality?.[input.quality]
+        : undefined;
 
       const images = await runFalEdit(config.endpoint, {
         prompt: input.instruction,
@@ -84,11 +86,14 @@ export function createFalEditor(config: FalEditorConfig): ImageEditor {
         throw new Error(`${config.endpoint} returned no images.`);
       }
 
-      const outPath = path.join(
-        process.cwd(),
-        "output",
-        `${config.id}-${Date.now()}.png`,
-      );
+      // On Vercel the deployment bundle is read-only — only /tmp is
+      // writable, and it doesn't persist across invocations (fine here,
+      // since callers that care about persistence, like the CLI, only run
+      // locally where process.cwd()/output is writable and kept).
+      const outputDir = process.env.VERCEL
+        ? "/tmp/output"
+        : path.join(process.cwd(), "output");
+      const outPath = path.join(outputDir, `${config.id}-${Date.now()}.png`);
       const { width, height } = await saveAsPng(firstImage.url, outPath);
 
       return {

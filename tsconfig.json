@@ -10,5 +10,5 @@
     "outDir": "dist",
     "noUncheckedIndexedAccess": true
   },
-  "include": ["src"]
+  "include": ["src", "api"]
 }

@@ -1,7 +1,6 @@
 import "dotenv/config";
 import http from "node:http";
-import { readFile, mkdir, stat, copyFile } from "node:fs/promises";
-import { randomUUID } from "node:crypto";
+import { readFile, mkdir, stat, unlink } from "node:fs/promises";
 import path from "node:path";
 import type { EditQuality, ImageEditor, PromptEngineer } from "./core/types.js";
 import { EditorRegistry } from "./core/registry.js";
@@ -131,33 +130,6 @@ async function serveStatic(
   }
 }
 
-async function serveOutput(
-  res: http.ServerResponse,
-  filename: string,
-): Promise<void> {
-  // Reject anything that isn't a plain basename — no path traversal via
-  // "..", no absolute paths, no nested segments.
-  if (!filename || filename.includes("/") || filename.includes("..")) {
-    sendJson(res, 400, { error: "Invalid filename" });
-    return;
-  }
-
-  const resolved = path.join(OUTPUT_DIR, filename);
-  if (resolved !== OUTPUT_DIR && !resolved.startsWith(OUTPUT_DIR + path.sep)) {
-    sendJson(res, 400, { error: "Invalid filename" });
-    return;
-  }
-
-  try {
-    const body = await readFile(resolved);
-    res.writeHead(200, { "Content-Type": "image/png" });
-    res.end(body);
-  } catch {
-    res.writeHead(404, { "Content-Type": "text/plain" });
-    res.end("Not found");
-  }
-}
-
 interface EditRequestBody {
   imageBase64?: unknown;
   instruction?: unknown;
@@ -224,14 +196,17 @@ async function handleEdit(
       quality,
     });
 
-    // The on-disk filename from createFalEditor embeds the editor id
-    // (useful for CLI/dev use) — copy to a neutral name before exposing it,
-    // since the id must never appear anywhere client-visible, including URLs.
-    const publicFilename = `${randomUUID()}.png`;
-    await copyFile(result.imagePath, path.join(OUTPUT_DIR, publicFilename));
+    // Read the edit back into the response directly — no persistent/served
+    // output directory at all, so there's nothing to guard against path
+    // traversal and nothing that outlives this request. The on-disk file
+    // (which embeds the real editor id in its name) is a transient
+    // implementation detail of createFalEditor, deleted immediately after
+    // we've read it, whether or not that succeeded.
+    const pngBuffer = await readFile(result.imagePath);
+    await unlink(result.imagePath).catch(() => {});
 
     sendJson(res, 200, {
-      imagePath: `/output/${publicFilename}`,
+      imageBase64: `data:image/png;base64,${pngBuffer.toString("base64")}`,
       width: result.width,
       height: result.height,
     });
@@ -256,11 +231,6 @@ const server = http.createServer((req, res) => {
 
     if (req.method === "POST" && url.pathname === "/api/edit") {
       await handleEdit(req, res);
-      return;
-    }
-
-    if (req.method === "GET" && url.pathname.startsWith("/output/")) {
-      await serveOutput(res, url.pathname.slice("/output/".length));
       return;
     }
 
