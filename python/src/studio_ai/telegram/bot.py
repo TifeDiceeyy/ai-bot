@@ -20,6 +20,7 @@ from studio_ai.core.types import EditInput, EditQuality, ImageEditor
 from studio_ai.runtime import Runtime, create_runtime
 from studio_ai.telegram.auth import AuthorizedUserFilter
 from studio_ai.telegram.dispatcher import ConflictAwareDispatcher
+from studio_ai.telegram.egress_budget import MonthlyEgressBudget
 from studio_ai.telegram.lock import DuplicateInstanceError, ProcessLock
 from studio_ai.telegram.pending_store import (
     InMemoryPendingStore,
@@ -76,8 +77,10 @@ def create_router(
     runtime: Runtime,
     pending_store: PendingStore,
     settings: Settings | None = None,
+    egress_budget: MonthlyEgressBudget | None = None,
 ) -> Router:
     settings = settings or get_settings()
+    egress_budget = egress_budget or MonthlyEgressBudget(settings.egress_budget_path)
     router = Router()
     guard = AuthorizedUserFilter(settings)
     router.message.filter(guard)
@@ -157,6 +160,14 @@ def create_router(
             )
             return
 
+        if not egress_budget.can_edit():
+            await callback.answer()
+            await message.edit_text(
+                "Monthly free-tier safety limit reached — image editing is "
+                "paused until next month to avoid any hosting cost."
+            )
+            return
+
         await pending_store.delete(message.chat.id)
         await callback.answer()
         await message.edit_text(f"Editing ({quality})…")
@@ -171,6 +182,7 @@ def create_router(
                 return
             instruction = await engineer.engineer(image, job.instruction)
             result = await editor.edit(EditInput(image, instruction, quality))
+            egress_budget.record(len(image) + len(result.image))
             await message.answer_document(
                 BufferedInputFile(result.image, filename="edited.png"),
                 caption=f"{result.width}x{result.height}",
