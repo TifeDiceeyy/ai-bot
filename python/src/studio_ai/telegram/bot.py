@@ -5,8 +5,8 @@ from io import BytesIO
 from typing import cast
 
 from aiogram import Bot, F, Router
-from aiogram.exceptions import TelegramConflictError
-from aiogram.filters import CommandStart
+from aiogram.exceptions import TelegramAPIError, TelegramConflictError
+from aiogram.filters import Command, CommandObject, CommandStart, Filter
 from aiogram.types import (
     BufferedInputFile,
     CallbackQuery,
@@ -18,7 +18,9 @@ from aiogram.types import (
 from studio_ai.config import Settings, get_settings
 from studio_ai.core.types import EditInput, EditQuality, ImageEditor
 from studio_ai.runtime import Runtime, create_runtime
-from studio_ai.telegram.auth import AuthorizedUserFilter
+from studio_ai.telegram.auth import AuthorizedUserFilter, UnauthorizedUserFilter
+from studio_ai.telegram.authorized_users import AuthorizedUserStore
+from studio_ai.telegram.contact_inbox import AdminReplyState, ContactInbox
 from studio_ai.telegram.dispatcher import ConflictAwareDispatcher
 from studio_ai.telegram.lock import DuplicateInstanceError, ProcessLock
 from studio_ai.telegram.pending_store import (
@@ -29,6 +31,42 @@ from studio_ai.telegram.pending_store import (
 
 CONFLICT_EXIT_CODE = 78
 LOGGER = logging.getLogger(__name__)
+
+INBOX_OPEN_CALLBACK = "inbox:open"
+INBOX_SELECT_PREFIX = "inbox:select:"
+
+
+class ActiveReplyFilter(Filter):
+    """Matches a plain-text message from an admin currently in reply mode.
+
+    Commands (leading "/") are excluded so /done, /promote, etc. still work
+    while replying. Returns the resolved target chat id as extra handler
+    kwargs (aiogram's dict-return filter convention).
+    """
+
+    def __init__(self, state: AdminReplyState) -> None:
+        self._state = state
+
+    async def __call__(self, message: Message) -> bool | dict[str, object]:
+        if message.text and message.text.startswith("/"):
+            return False
+        target_chat_id = self._state.get(message.chat.id)
+        if target_chat_id is None:
+            return False
+        return {"target_chat_id": target_chat_id}
+
+
+def inbox_keyboard(threads: list[tuple[int, str]]) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text=label, callback_data=f"{INBOX_SELECT_PREFIX}{chat_id}"
+                )
+            ]
+            for chat_id, label in threads
+        ]
+    )
 
 
 def editor_keyboard() -> InlineKeyboardMarkup:
@@ -76,14 +114,18 @@ def create_router(
     runtime: Runtime,
     pending_store: PendingStore,
     settings: Settings | None = None,
+    user_store: AuthorizedUserStore | None = None,
 ) -> Router:
     settings = settings or get_settings()
+    user_store = user_store or AuthorizedUserStore(
+        settings.authorized_users_path, settings.allowed_telegram_user_id
+    )
     router = Router()
-    guard = AuthorizedUserFilter(settings)
-    router.message.filter(guard)
-    router.callback_query.filter(guard)
+    guard = AuthorizedUserFilter(user_store)
+    inbox = ContactInbox()
+    reply_state = AdminReplyState()
 
-    @router.message(CommandStart())
+    @router.message(CommandStart(), guard)
     async def start(message: Message) -> None:
         await message.answer(
             "Send me a photo with a caption describing the edit "
@@ -91,7 +133,131 @@ def create_router(
             "I'll ask what edit you want."
         )
 
-    @router.message(F.photo)
+    @router.message(Command("promote"), guard)
+    async def promote(message: Message, command: CommandObject) -> None:
+        target = (command.args or "").strip()
+        if not target.lstrip("-").isdigit():
+            await message.answer("Usage: /promote <telegram_user_id>")
+            return
+        user_store.add(int(target))
+        await message.answer(f"User {target} is now authorized.")
+
+    @router.message(Command("revoke"), guard)
+    async def revoke(message: Message, command: CommandObject) -> None:
+        target = (command.args or "").strip()
+        if not target.lstrip("-").isdigit():
+            await message.answer("Usage: /revoke <telegram_user_id>")
+            return
+        if user_store.remove(int(target)):
+            await message.answer(f"User {target} is no longer authorized.")
+        else:
+            await message.answer(f"User {target} wasn't authorized.")
+
+    @router.message(Command("done"), guard)
+    async def done(message: Message) -> None:
+        if reply_state.clear(message.chat.id):
+            await message.answer("Stopped replying.")
+        else:
+            await message.answer("You weren't replying to anyone.")
+
+    def _inbox_reply() -> tuple[str, InlineKeyboardMarkup | None]:
+        threads = [(t.chat_id, t.label) for t in inbox.list_threads()]
+        if not threads:
+            return "Inbox is empty.", None
+        return "Open contact threads:", inbox_keyboard(threads)
+
+    @router.message(Command("inbox"), guard)
+    async def inbox_command(message: Message) -> None:
+        text, markup = _inbox_reply()
+        await message.answer(text, reply_markup=markup)
+
+    @router.callback_query(guard, F.data == INBOX_OPEN_CALLBACK)
+    async def open_inbox(callback: CallbackQuery) -> None:
+        message = callback.message
+        if not isinstance(message, Message):
+            await callback.answer()
+            return
+        text, markup = _inbox_reply()
+        await message.answer(text, reply_markup=markup)
+        await callback.answer()
+
+    @router.callback_query(guard, F.data.startswith(INBOX_SELECT_PREFIX))
+    async def select_thread(callback: CallbackQuery) -> None:
+        message = callback.message
+        if not isinstance(message, Message):
+            await callback.answer()
+            return
+        target_chat_id = int((callback.data or "").removeprefix(INBOX_SELECT_PREFIX))
+        thread = inbox.get(target_chat_id)
+        reply_state.set(message.chat.id, target_chat_id)
+        label = thread.label if thread else str(target_chat_id)
+        await callback.answer()
+        await message.answer(
+            f"Replying to {label}. Send your message, or /done to stop."
+        )
+
+    @router.message(guard, ActiveReplyFilter(reply_state))
+    async def send_reply(message: Message, bot: Bot, target_chat_id: int) -> None:
+        try:
+            await bot.copy_message(
+                chat_id=target_chat_id,
+                from_chat_id=message.chat.id,
+                message_id=message.message_id,
+            )
+        except TelegramAPIError as error:
+            LOGGER.warning(
+                "Failed to relay admin reply to %s: %s", target_chat_id, error
+            )
+            await message.reply(f"Could not deliver: {error}")
+            return
+        await message.reply("Sent.")
+
+    @router.message(UnauthorizedUserFilter(user_store))
+    async def contact_admin(message: Message, bot: Bot) -> None:
+        admin_ids = user_store.list_ids()
+        user = message.from_user
+        if user is None:
+            return
+        who = f"{user.full_name} (id={user.id})" + (
+            f" @{user.username}" if user.username else ""
+        )
+        inbox.remember(message.chat.id, who)
+        for admin_id in admin_ids:
+            try:
+                await bot.send_message(
+                    admin_id,
+                    f"New message from {who}:",
+                    reply_markup=InlineKeyboardMarkup(
+                        inline_keyboard=[
+                            [
+                                InlineKeyboardButton(
+                                    text="View inbox",
+                                    callback_data=INBOX_OPEN_CALLBACK,
+                                )
+                            ]
+                        ]
+                    ),
+                )
+                await bot.forward_message(
+                    chat_id=admin_id,
+                    from_chat_id=message.chat.id,
+                    message_id=message.message_id,
+                )
+            except TelegramAPIError as error:
+                LOGGER.warning(
+                    "Failed to relay contact message to admin %s: %s",
+                    admin_id,
+                    error,
+                )
+        if admin_ids:
+            await message.answer(
+                "You're not authorized to use this bot. Your message has been "
+                "forwarded to the admin."
+            )
+        else:
+            await message.answer("You're not authorized to use this bot.")
+
+    @router.message(guard, F.photo)
     async def receive_photo(message: Message) -> None:
         if not message.photo:
             return
@@ -103,7 +269,7 @@ def create_router(
         else:
             await message.answer("Got the photo — now tell me what edit you'd like.")
 
-    @router.message(F.text)
+    @router.message(guard, F.text)
     async def receive_instruction(message: Message) -> None:
         job = await pending_store.get(message.chat.id)
         if job is None:
@@ -115,7 +281,7 @@ def create_router(
         await pending_store.set(message.chat.id, job)
         await message.answer("Pick a style:", reply_markup=editor_keyboard())
 
-    @router.callback_query(F.data.startswith("editor:"))
+    @router.callback_query(guard, F.data.startswith("editor:"))
     async def choose_editor(callback: CallbackQuery) -> None:
         message = callback.message
         if not isinstance(message, Message):
@@ -134,7 +300,7 @@ def create_router(
             "Pick a quality:", reply_markup=quality_keyboard(editor)
         )
 
-    @router.callback_query(F.data.startswith("quality:"))
+    @router.callback_query(guard, F.data.startswith("quality:"))
     async def choose_quality(callback: CallbackQuery, bot: Bot) -> None:
         message = callback.message
         if not isinstance(message, Message):

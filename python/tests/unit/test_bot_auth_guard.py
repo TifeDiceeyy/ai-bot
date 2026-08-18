@@ -1,47 +1,19 @@
-from typing import Any, Literal
+from pathlib import Path
+from typing import Literal
 
-from aiogram import Bot, Dispatcher
-from aiogram.client.session.base import BaseSession
-from aiogram.methods import TelegramMethod
+from aiogram import Dispatcher
 from aiogram.types import Update
+from stub_session import stub_bot as _bot
 
 from studio_ai.config import Settings
 from studio_ai.core.types import EditInput, EditResult
 from studio_ai.runtime import Runtime
+from studio_ai.telegram.authorized_users import AuthorizedUserStore
 from studio_ai.telegram.bot import create_router
 from studio_ai.telegram.pending_store import InMemoryPendingStore, PendingEdit
 
 ALLOWED = 42
 OTHER = 999
-
-
-class StubSession(BaseSession):
-    """Never touches the network, so tests can't accidentally hit Telegram."""
-
-    async def close(self) -> None:
-        return None
-
-    async def make_request(
-        self, bot: Bot, method: TelegramMethod[Any], timeout: int | None = None
-    ) -> Any:
-        del bot, method, timeout
-        return True
-
-    async def stream_content(
-        self,
-        url: str,
-        headers: dict[str, Any] | None = None,
-        timeout: int = 30,
-        chunk_size: int = 65536,
-        raise_for_status: bool = True,
-    ) -> Any:
-        del url, headers, timeout, chunk_size, raise_for_status
-        if False:  # pragma: no cover - makes this an async generator
-            yield b""
-
-
-def _bot() -> Bot:
-    return Bot("123:test", session=StubSession())
 
 
 class ExplodingEditor:
@@ -75,10 +47,13 @@ def _runtime() -> Runtime:
     )
 
 
-def _dispatcher(pending_store: InMemoryPendingStore) -> Dispatcher:
+def _dispatcher(pending_store: InMemoryPendingStore, tmp_path: Path) -> Dispatcher:
     settings = Settings(ALLOWED_TELEGRAM_USER_ID=ALLOWED)
+    user_store = AuthorizedUserStore(tmp_path / "authorized_users.json", ALLOWED)
     dispatcher = Dispatcher()
-    dispatcher.include_router(create_router(_runtime(), pending_store, settings))
+    dispatcher.include_router(
+        create_router(_runtime(), pending_store, settings, user_store)
+    )
     return dispatcher
 
 
@@ -144,9 +119,9 @@ def _callback_update(update_id: int, user_id: int, data: str) -> Update:
     )
 
 
-async def test_unauthorized_photo_never_reaches_pending_store() -> None:
+async def test_unauthorized_photo_never_reaches_pending_store(tmp_path: Path) -> None:
     pending_store = InMemoryPendingStore()
-    dispatcher = _dispatcher(pending_store)
+    dispatcher = _dispatcher(pending_store, tmp_path)
     bot = _bot()
 
     await dispatcher.feed_update(bot, _photo_update(1, OTHER))
@@ -154,9 +129,11 @@ async def test_unauthorized_photo_never_reaches_pending_store() -> None:
     assert await pending_store.get(OTHER) is None
 
 
-async def test_unauthorized_instruction_never_reaches_pending_store() -> None:
+async def test_unauthorized_instruction_never_reaches_pending_store(
+    tmp_path: Path,
+) -> None:
     pending_store = InMemoryPendingStore()
-    dispatcher = _dispatcher(pending_store)
+    dispatcher = _dispatcher(pending_store, tmp_path)
     bot = _bot()
 
     await dispatcher.feed_update(bot, _text_update(1, OTHER, "make it blue"))
@@ -164,10 +141,10 @@ async def test_unauthorized_instruction_never_reaches_pending_store() -> None:
     assert await pending_store.get(OTHER) is None
 
 
-async def test_unauthorized_editor_choice_never_calls_editor() -> None:
+async def test_unauthorized_editor_choice_never_calls_editor(tmp_path: Path) -> None:
     pending_store = InMemoryPendingStore()
     await pending_store.set(OTHER, PendingEdit("file-1", "make it blue"))
-    dispatcher = _dispatcher(pending_store)
+    dispatcher = _dispatcher(pending_store, tmp_path)
     bot = _bot()
 
     # If the guard didn't hold, choose_editor would read runtime.editors and
@@ -179,12 +156,14 @@ async def test_unauthorized_editor_choice_never_calls_editor() -> None:
     assert job.editor_codename is None
 
 
-async def test_unauthorized_quality_choice_never_downloads_or_calls_provider() -> None:
+async def test_unauthorized_quality_choice_never_downloads_or_calls_provider(
+    tmp_path: Path,
+) -> None:
     pending_store = InMemoryPendingStore()
     await pending_store.set(
         OTHER, PendingEdit("file-1", "make it blue", "banana")
     )
-    dispatcher = _dispatcher(pending_store)
+    dispatcher = _dispatcher(pending_store, tmp_path)
     bot = _bot()
 
     # If the guard didn't hold, this would reach _download_photo() (a real
@@ -195,9 +174,9 @@ async def test_unauthorized_quality_choice_never_downloads_or_calls_provider() -
     assert await pending_store.get(OTHER) is not None
 
 
-async def test_authorized_photo_reaches_pending_store() -> None:
+async def test_authorized_photo_reaches_pending_store(tmp_path: Path) -> None:
     pending_store = InMemoryPendingStore()
-    dispatcher = _dispatcher(pending_store)
+    dispatcher = _dispatcher(pending_store, tmp_path)
     bot = _bot()
 
     await dispatcher.feed_update(bot, _photo_update(1, ALLOWED))

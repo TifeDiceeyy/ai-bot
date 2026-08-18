@@ -1,10 +1,16 @@
+from pathlib import Path
+
 from aiogram.types import CallbackQuery, Message
 
-from studio_ai.config import Settings
-from studio_ai.telegram.auth import AuthorizedUserFilter
+from studio_ai.telegram.auth import AuthorizedUserFilter, UnauthorizedUserFilter
+from studio_ai.telegram.authorized_users import AuthorizedUserStore
 
 ALLOWED = 42
 OTHER = 999
+
+
+def _store(tmp_path: Path, bootstrap: int | None) -> AuthorizedUserStore:
+    return AuthorizedUserStore(tmp_path / "authorized_users.json", bootstrap)
 
 
 def _message(user_id: int | None) -> Message:
@@ -30,32 +36,39 @@ def _callback(user_id: int) -> CallbackQuery:
     )
 
 
-async def test_allows_the_configured_user() -> None:
-    guard = AuthorizedUserFilter(Settings(ALLOWED_TELEGRAM_USER_ID=ALLOWED))
+async def test_allows_the_configured_user(tmp_path: Path) -> None:
+    guard = AuthorizedUserFilter(_store(tmp_path, ALLOWED))
 
     assert await guard(_message(ALLOWED)) is True
 
 
-async def test_rejects_every_other_user() -> None:
-    guard = AuthorizedUserFilter(Settings(ALLOWED_TELEGRAM_USER_ID=ALLOWED))
+async def test_rejects_every_other_user(tmp_path: Path) -> None:
+    guard = AuthorizedUserFilter(_store(tmp_path, ALLOWED))
 
     assert await guard(_message(OTHER)) is False
 
 
-async def test_fails_closed_when_unset() -> None:
-    guard = AuthorizedUserFilter(Settings(ALLOWED_TELEGRAM_USER_ID=None))
+async def test_fails_closed_when_unset(tmp_path: Path) -> None:
+    guard = AuthorizedUserFilter(_store(tmp_path, None))
 
     assert await guard(_message(ALLOWED)) is False
 
 
-async def test_rejects_events_with_no_user() -> None:
-    guard = AuthorizedUserFilter(Settings(ALLOWED_TELEGRAM_USER_ID=ALLOWED))
+async def test_rejects_events_with_no_user(tmp_path: Path) -> None:
+    guard = AuthorizedUserFilter(_store(tmp_path, ALLOWED))
 
     assert await guard(_message(None)) is False
 
 
-async def test_callback_queries_are_gated_the_same_way() -> None:
-    guard = AuthorizedUserFilter(Settings(ALLOWED_TELEGRAM_USER_ID=ALLOWED))
+async def test_callback_queries_are_gated_the_same_way(tmp_path: Path) -> None:
+    guard = AuthorizedUserFilter(_store(tmp_path, ALLOWED))
 
     assert await guard(_callback(ALLOWED)) is True
     assert await guard(_callback(OTHER)) is False
+
+
+async def test_unauthorized_filter_is_the_inverse(tmp_path: Path) -> None:
+    guard = UnauthorizedUserFilter(_store(tmp_path, ALLOWED))
+
+    assert await guard(_message(ALLOWED)) is False
+    assert await guard(_message(OTHER)) is True

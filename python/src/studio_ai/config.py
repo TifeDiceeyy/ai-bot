@@ -32,6 +32,12 @@ class Settings(BaseSettings):
     allowed_telegram_user_id: int | None = Field(
         default=None, alias="ALLOWED_TELEGRAM_USER_ID"
     )
+    authorized_users_path: str = Field(
+        default=str(
+            Path(__file__).resolve().parents[3] / "data" / "authorized_users.json"
+        ),
+        alias="AUTHORIZED_USERS_PATH",
+    )
 
     @field_validator("allowed_telegram_user_id", mode="before")
     @classmethod
