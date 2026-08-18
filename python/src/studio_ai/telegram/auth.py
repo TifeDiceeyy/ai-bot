@@ -1,35 +1,21 @@
 from aiogram.filters import Filter
 from aiogram.types import CallbackQuery, Message
 
-from studio_ai.telegram.authorized_users import AuthorizedUserStore
-
-
-def _is_authorized(
-    event: Message | CallbackQuery, store: AuthorizedUserStore
-) -> bool:
-    user = event.from_user
-    return user is not None and store.is_authorized(user.id)
+from studio_ai.config import Settings
 
 
 class AuthorizedUserFilter(Filter):
-    """Gate a handler to users in the AuthorizedUserStore.
+    """Gate every message and callback to a single Telegram user id.
 
-    Fails closed: an empty store (e.g. ALLOWED_TELEGRAM_USER_ID never set)
-    matches nothing.
+    Fails closed: if ALLOWED_TELEGRAM_USER_ID isn't configured, nothing
+    matches.
     """
 
-    def __init__(self, store: AuthorizedUserStore) -> None:
-        self._store = store
+    def __init__(self, settings: Settings) -> None:
+        self._allowed_user_id = settings.allowed_telegram_user_id
 
     async def __call__(self, event: Message | CallbackQuery) -> bool:
-        return _is_authorized(event, self._store)
-
-
-class UnauthorizedUserFilter(Filter):
-    """The inverse of AuthorizedUserFilter, for the contact-admin fallback."""
-
-    def __init__(self, store: AuthorizedUserStore) -> None:
-        self._store = store
-
-    async def __call__(self, event: Message | CallbackQuery) -> bool:
-        return not _is_authorized(event, self._store)
+        if self._allowed_user_id is None:
+            return False
+        user = event.from_user
+        return user is not None and user.id == self._allowed_user_id
