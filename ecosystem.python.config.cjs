@@ -17,6 +17,9 @@ module.exports = {
       max_restarts: 10,
       min_uptime: "10s",
       time: true,
+      env: {
+        PYTHONUNBUFFERED: "1",
+      },
     },
   ],
 };
