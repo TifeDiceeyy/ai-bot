@@ -5,9 +5,10 @@ from io import BytesIO
 from typing import cast
 
 from aiogram import Bot, F, Router
-from aiogram.exceptions import TelegramConflictError
+from aiogram.exceptions import TelegramAPIError, TelegramConflictError
 from aiogram.filters import CommandStart
 from aiogram.types import (
+    BotCommand,
     BufferedInputFile,
     CallbackQuery,
     InlineKeyboardButton,
@@ -30,6 +31,18 @@ from studio_ai.telegram.pending_store import (
 
 CONFLICT_EXIT_CODE = 78
 LOGGER = logging.getLogger(__name__)
+
+
+def bot_commands() -> list[BotCommand]:
+    return [BotCommand(command="start", description="Start a new edit")]
+
+
+async def register_commands(bot: Bot) -> None:
+    """Show /start in the chat's Menu button. Cosmetic, so never fatal."""
+    try:
+        await bot.set_my_commands(bot_commands())
+    except TelegramAPIError as error:
+        LOGGER.warning("Could not register bot commands: %s", error)
 
 
 def editor_keyboard() -> InlineKeyboardMarkup:
@@ -207,6 +220,7 @@ async def main() -> None:
     dispatcher.include_router(
         create_router(runtime, InMemoryPendingStore(), settings)
     )
+    await register_commands(bot)
     me = await bot.get_me()
     LOGGER.info("Telegram bot @%s starting with long polling", me.username)
     await dispatcher.start_polling(bot)
