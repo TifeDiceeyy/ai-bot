@@ -26,49 +26,55 @@ BOT_TOKEN=<test-token> .venv/bin/studio-ai-bot
 
 Never give the test bot and production bot the same token.
 
-## Windows setup (production)
+## Production host: Google Cloud
 
-The bot runs long-polling on a Windows machine, kept alive by PM2 as long as
-that machine is on. There is no server deployment or webhook — Telegram is
-polled directly from this machine.
+The production bot (`@Tommy007mikBot`) runs long-polling on a Google Cloud
+Compute Engine VM, kept alive by PM2. There is no webhook — Telegram is polled
+directly from the VM.
 
-```powershell
-git clone https://github.com/TifeDiceeyy/ai-bot.git
-cd ai-bot
-copy .env.example .env
-REM fill in FAL_KEY, BOT_TOKEN, ALLOWED_TELEGRAM_USER_ID in .env
+|                |                                                                  |
+| -------------- | ---------------------------------------------------------------- |
+| VM             | `tommy-bot`                                                      |
+| Project        | `studio-bot-505917`                                              |
+| Zone           | `us-central1-c`                                                  |
+| Machine type   | `e2-micro` (Always Free tier)                                    |
+| Repo on the VM | `~/ai-bot`                                                       |
+| Secrets        | `~/ai-bot/.env`                                                  |
+| PM2 process    | `ai-bot`                                                         |
+| Logs           | `~/.pm2/logs/ai-bot-out-0.log`, `~/.pm2/logs/ai-bot-error-0.log` |
 
-cd python
-python -m venv .venv
-.venv\Scripts\pip install -e ".[dev]"
-.venv\Scripts\pytest
-cd ..
+Connect from a machine with `gcloud` authenticated:
+
+```bash
+gcloud compute ssh tommy-bot --zone us-central1-c --project studio-bot-505917
 ```
 
-Install PM2 and the Windows helper that starts PM2's saved process list on
-boot/logon (run once):
+The bot blocks new edits before the VM reaches the Always Free tier's 1 GB/month
+egress limit (`python/src/studio_ai/telegram/egress_budget.py`).
 
-```powershell
-npm install -g pm2
-npm install -g pm2-windows-startup
-pm2-startup install
-```
+### Production token rule
 
-Start the bot under PM2 and persist it across reboots:
+**The production `BOT_TOKEN` runs only on the Google Cloud VM. Never anywhere
+else.** Do not put the production token in a `.env` on a laptop, desktop, the
+old Windows machine, Vercel, or any other server, and do not run the bot with
+it outside the VM — not even briefly for a test.
 
-```powershell
-pm2 start ecosystem.python.config.cjs --only ai-bot
-pm2 save
-```
+Telegram allows only one poller per token. A second copy anywhere makes the VM
+bot exit with code 78, and PM2 deliberately leaves it stopped (see "Duplicate
+polling protection"). This is what took the bot offline from 2026-09-21 to
+2026-10-11.
 
-After this, PM2 restarts the bot on crash (`autorestart`) and relaunches it
-automatically whenever the machine boots or you log back in, for as long as
-the machine stays on. See "Duplicate polling protection" below for what
-prevents two copies of the bot polling the same token at once.
+For local development, create a separate test bot with @BotFather and use its
+token instead (see "Python development setup").
+
+If the production token has ever been copied somewhere else, either delete it
+from there or revoke it with @BotFather (`/revoke`), put the new token in
+`~/ai-bot/.env` on the VM, and run `pm2 restart ai-bot --update-env`.
 
 ## Production Telegram operations
 
-PM2 is the only supported way to run the Telegram bot in production. Do not run
+Run these on the Google Cloud VM. PM2 on the VM is the only supported way to
+run the Telegram bot in production. Do not run
 `npm run bot`, `python -m studio_ai.telegram.bot`, or `studio-ai-bot` manually
 while PM2 manages `ai-bot`.
 
@@ -103,8 +109,12 @@ The Python bot uses three safeguards:
 3. A Telegram `409 Conflict` exits with code 78. PM2 treats this as an expected
    stop rather than repeatedly restarting and hammering Telegram.
 
+Safeguards 1 and 2 only work on a single machine. Nothing in the code can stop
+another machine from polling with the same token, which is why the production
+token must stay on the Google Cloud VM only (see "Production token rule").
+
 If a conflict occurs, find the other machine, PM2 application, or manual
-process using the same `BOT_TOKEN`. Stop it, then run:
+process using the same `BOT_TOKEN`. Stop it, then run this on the VM:
 
 ```bash
 pm2 restart ai-bot
