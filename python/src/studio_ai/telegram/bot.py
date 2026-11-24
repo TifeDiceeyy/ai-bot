@@ -1,8 +1,10 @@
 import asyncio
 import logging
 import sys
+import time
+from collections.abc import Callable
 from io import BytesIO
-from typing import cast
+from typing import NoReturn, cast
 
 from aiogram import Bot, F, Router
 from aiogram.exceptions import TelegramAPIError, TelegramConflictError
@@ -30,6 +32,13 @@ from studio_ai.telegram.pending_store import (
 )
 
 CONFLICT_EXIT_CODE = 78
+# Exit code for "shut down, wait, let PM2 start a fresh process". Deliberately
+# NOT in PM2's stop_exit_codes, so PM2 restarts the bot after it.
+RESTART_EXIT_CODE = 75
+# After a request timeout, Telegram can keep this bot's own previous long-poll
+# open for up to the polling timeout (30s) and answer the next one with
+# 409 Conflict. Waiting longer than that before restarting lets it expire.
+CONFLICT_RESTART_DELAY_SECONDS = 40.0
 LOGGER = logging.getLogger(__name__)
 
 
@@ -226,6 +235,20 @@ async def main() -> None:
     await dispatcher.start_polling(bot)
 
 
+def restart_after_conflict(
+    sleep: Callable[[float], None] = time.sleep,
+) -> NoReturn:
+    """Wait out a stale Telegram long-poll, then exit so PM2 restarts us."""
+    LOGGER.critical(
+        "Telegram polling conflict (409): another poller is using this "
+        "BOT_TOKEN, possibly this bot's own stale connection. Shutting down, "
+        "waiting %.0f seconds, then exiting so PM2 starts a fresh process.",
+        CONFLICT_RESTART_DELAY_SECONDS,
+    )
+    sleep(CONFLICT_RESTART_DELAY_SECONDS)
+    raise SystemExit(RESTART_EXIT_CODE)
+
+
 def run() -> None:
     logging.basicConfig(
         level=logging.INFO,
@@ -244,13 +267,8 @@ def run() -> None:
             error,
         )
         raise SystemExit(CONFLICT_EXIT_CODE) from error
-    except TelegramConflictError as error:
-        LOGGER.critical(
-            "Telegram polling stopped: another instance is already polling with "
-            "this BOT_TOKEN. Stop the duplicate instance, then run "
-            "`pm2 restart ai-bot`."
-        )
-        raise SystemExit(CONFLICT_EXIT_CODE) from error
+    except TelegramConflictError:
+        restart_after_conflict()
 
 
 if __name__ == "__main__":

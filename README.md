@@ -106,15 +106,23 @@ The Python bot uses three safeguards:
 1. PM2 is configured for one process in fork mode.
 2. An exclusive lock file (the OS temp dir by default, override with
    `BOT_LOCK_PATH`) rejects a second process on the same machine.
-3. A Telegram `409 Conflict` exits with code 78. PM2 treats this as an expected
-   stop rather than repeatedly restarting and hammering Telegram.
+3. A Telegram `409 Conflict` makes the bot shut down, wait 40 seconds (longer
+   than Telegram's 30-second long-poll, so a stale poll from this bot's own
+   previous connection expires), and exit with code 75. PM2 then starts a fresh
+   process automatically. A second process on the same machine (the lock file)
+   still exits with code 78, which PM2 treats as a stop.
+
+If a real duplicate on another machine is polling, the bot will keep
+restarting about once a minute and logging the conflict, so the logs make the
+problem visible.
 
 Safeguards 1 and 2 only work on a single machine. Nothing in the code can stop
 another machine from polling with the same token, which is why the production
 token must stay on the Google Cloud VM only (see "Production token rule").
 
-If a conflict occurs, find the other machine, PM2 application, or manual
-process using the same `BOT_TOKEN`. Stop it, then run this on the VM:
+If the conflict keeps repeating, find the other machine, PM2 application, or
+manual process using the same `BOT_TOKEN` and stop it. If the bot is stopped,
+run this on the VM:
 
 ```bash
 pm2 restart ai-bot

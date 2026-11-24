@@ -9,9 +9,12 @@ from aiogram.methods import SetMyCommands, TelegramMethod
 from studio_ai.editors.fal_editor import FalEditor, QualityTier
 from studio_ai.telegram.bot import (
     CONFLICT_EXIT_CODE,
+    CONFLICT_RESTART_DELAY_SECONDS,
+    RESTART_EXIT_CODE,
     bot_commands,
     quality_keyboard,
     register_commands,
+    restart_after_conflict,
 )
 
 TEST_TOKEN = "42:TEST"
@@ -52,6 +55,25 @@ class RecordingSession(BaseSession):
 
 def test_conflict_exit_code_is_dedicated() -> None:
     assert CONFLICT_EXIT_CODE == 78
+
+
+def test_telegram_conflict_waits_then_exits_for_pm2_restart() -> None:
+    slept: list[float] = []
+    with pytest.raises(SystemExit) as exit_info:
+        restart_after_conflict(sleep=slept.append)
+    assert slept == [CONFLICT_RESTART_DELAY_SECONDS]
+    # Must outlast Telegram's 30s long-poll so a stale poll has expired.
+    assert CONFLICT_RESTART_DELAY_SECONDS > 30
+    assert exit_info.value.code == RESTART_EXIT_CODE
+
+
+def test_restart_exit_code_is_not_a_pm2_stop_code() -> None:
+    from pathlib import Path
+
+    config = Path(__file__).resolve().parents[3] / "ecosystem.python.config.cjs"
+    text = config.read_text()
+    assert "stop_exit_codes: [78]" in text
+    assert RESTART_EXIT_CODE != CONFLICT_EXIT_CODE
 
 
 def test_quality_keyboard_uses_editor_costs() -> None:
